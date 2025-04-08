@@ -17,6 +17,9 @@ public class MapGenerator : MonoBehaviour
     [Header("Optional Features")]
     public GameObject labPrefab;    // Prefab for the research lab (optional)
 
+	private GameObject currentLabInstance;
+
+
     private int[,] map;             // 2D grid for map: 1 = land, 0 = water
 
     void Start()
@@ -260,29 +263,38 @@ public class MapGenerator : MonoBehaviour
 
         // 4. (Optional) Place the research lab on the largest island
         if (labPrefab != null)
-        {
-            if (largestLand == null)
-            {
-                // Recompute largest land region after removals if needed
-                landRegions = GetRegions(1);
-                foreach (var region in landRegions)
-                {
-                    if (region.Count > largestLandSize)
-                    {
-                        largestLandSize = region.Count;
-                        largestLand = region;
-                    }
-                }
-            }
-            if (largestLand != null && largestLand.Count > 0)
-            {
-                // Find center of largest island region
-                Vector2Int labPosition = FindRegionCenter(largestLand);
-                // Instantiate the lab prefab at the corresponding world position
-                Vector3 labWorldPos = CoordToWorldPoint(labPosition.x, labPosition.y);
-                Instantiate(labPrefab, labWorldPos, Quaternion.identity);
-            }
-        }
+		{
+			// Destroy previously spawned lab
+			if (currentLabInstance != null)
+			{
+				Destroy(currentLabInstance);
+			}
+
+			if (largestLand == null)
+			{
+				// Recompute largest land region after removals if needed
+				landRegions = GetRegions(1);
+				foreach (var region in landRegions)
+				{
+					if (region.Count > largestLandSize)
+					{
+						largestLandSize = region.Count;
+						largestLand = region;
+					}
+				}
+			}
+
+			if (largestLand != null && largestLand.Count > 0)
+			{
+				// Find center of selected island
+				Vector2Int labPosition = FindRegionCenter(largestLand);
+				Vector3 labWorldPos = CoordToWorldPoint(labPosition.x, labPosition.y);
+
+				// Instantiate and track the lab
+				currentLabInstance = Instantiate(labPrefab, labWorldPos, Quaternion.identity);
+			}
+		}
+
     }
 
     // Get all regions (connected components) of a given cell type (0 for water, 1 for land).
