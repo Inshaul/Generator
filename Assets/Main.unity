@@ -467,6 +467,7 @@ MonoBehaviour:
   zombiesPerIsland: 2
   allowZombieWandering: 1
   zombieMoveChance: 0.02
+  playerPrefab: {fileID: 6547322782340710972, guid: 891fe33ec63add843aacf1f6e0bef049, type: 3}
 --- !u!4 &723202080
 Transform:
   m_ObjectHideFlags: 0
