@@ -47,6 +47,11 @@ public class MapGenerator : MonoBehaviour
 
     private Dictionary<GameObject, Vector3> zombieTargets = new Dictionary<GameObject, Vector3>();
 
+    public GameObject treePrefab;
+    [Range(0, 1f)] public float treeSpawnChance = 0.1f; // 10% of land tiles
+
+    private List<GameObject> spawnedTrees = new List<GameObject>();
+
     void Start()
     {
         GenerateMap();
@@ -445,6 +450,12 @@ public class MapGenerator : MonoBehaviour
             List<Vector2Int> labIsland = validIslands[labIslandIndex];
 
             Vector2Int labPos = FindRegionCenter(labIsland);
+            // Ensure the chosen tile is on land
+            if (map[labPos.x, labPos.y] != 1)
+            {
+                // Pick a fallback from within the island region (should be land)
+                labPos = labIsland[prng.Next(0, labIsland.Count)];
+            }
             Vector3 labWorldPos = CoordToWorldPoint(labPos.x, labPos.y);
             currentLabInstance = Instantiate(labPrefab, labWorldPos, Quaternion.identity);
             currentLabInstance.name = "ResearchLab";
@@ -515,7 +526,33 @@ public class MapGenerator : MonoBehaviour
             }
         }
 
-        // 6. (Optional) Decorate land tiles with rocks, trees, etc.
+        // === TREE DECORATION ===
+        if (treePrefab != null)
+        {
+            // Remove previously spawned trees
+            foreach (var tree in spawnedTrees)
+            {
+                if (tree != null)
+                    Destroy(tree);
+            }
+            spawnedTrees.Clear();
+
+            System.Random prng = new System.Random(seed.GetHashCode());
+
+            for (int x = 0; x < width; x++)
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    if (map[x, y] == 1 && prng.NextDouble() < treeSpawnChance)
+                    {
+                        Vector3 treePos = CoordToWorldPoint(x, y) + Vector3.up * 0.5f;
+                        Quaternion rot = Quaternion.Euler(0, prng.Next(0, 360), 0);
+                        GameObject newTree = Instantiate(treePrefab, treePos, rot);
+                        spawnedTrees.Add(newTree);
+                    }
+                }
+            }
+        }
     }
 
 }
