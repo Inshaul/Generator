@@ -12,15 +12,23 @@ public class MapGenerator : MonoBehaviour
     public string seed;
     public bool useRandomSeed;
     [Range(0, 100)]
-    public int randomFillPercent;   // Roughly interpreted as overall land coverage percentage
+    public int randomFillPercent;
 
-    [Header("Optional Features")]
-    public GameObject labPrefab;    // Prefab for the research lab (optional)
+    [Header("Optional Prefabs")]
+    public GameObject labPrefab;
+    public GameObject zombiePrefab;
+    public int zombiesPerIsland = 2;
+    public bool allowZombieWandering = true;
+    [Range(0f, 1f)] public float zombieMoveChance = 0.02f;
 
-	private GameObject currentLabInstance;
+    private int[,] map;
+    private GameObject currentLabInstance;
+    private List<GameObject> spawnedZombies = new List<GameObject>();
+    private Dictionary<GameObject, List<Vector2Int>> zombieToIsland = new Dictionary<GameObject, List<Vector2Int>>();
 
-
-    private int[,] map;             // 2D grid for map: 1 = land, 0 = water
+    // [Gizmos]
+    private List<List<Vector2Int>> islandRegions = new List<List<Vector2Int>>();
+    private List<Color> islandColors = new List<Color>();
 
     void Start()
     {
@@ -29,116 +37,220 @@ public class MapGenerator : MonoBehaviour
 
     void Update()
     {
-        // Regenerate map on left mouse click (for testing different layouts)
         if (Input.GetMouseButtonDown(0))
         {
             GenerateMap();
+        }
+
+        RotateZombiesTowardLab();
+
+        if (allowZombieWandering)
+        {
+            MoveZombiesRandomly();
+        }
+    }
+
+    void OnDrawGizmos()
+    {
+        if (map == null) return;
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                Vector3 pos = CoordToWorldPoint(x, y);
+                if (map[x, y] == 1)
+                {
+                    // Land: Color by region
+                    for (int i = 0; i < islandRegions.Count; i++)
+                    {
+                        if (islandRegions[i].Contains(new Vector2Int(x, y)))
+                        {
+                            Gizmos.color = islandColors[i];
+                            Gizmos.DrawCube(pos, Vector3.one * 0.95f);
+                            break;
+                        }
+                    }
+                }
+                else
+                {
+                    Gizmos.color = Color.cyan;
+                    Gizmos.DrawCube(pos, Vector3.one * 0.9f);
+                }
+            }
+        }
+
+        // Lab Gizmo
+        if (currentLabInstance != null)
+        {
+            Gizmos.color = Color.blue;
+            Gizmos.DrawSphere(currentLabInstance.transform.position + Vector3.up * 1.5f, 0.5f);
+        }
+
+        // Zombies Gizmo
+        Gizmos.color = Color.red;
+        foreach (var z in spawnedZombies)
+        {
+            if (z != null)
+                Gizmos.DrawSphere(z.transform.position + Vector3.up * 1.5f, 0.3f);
         }
     }
 
     void GenerateMap()
     {
         map = new int[width, height];
+        islandRegions.Clear();
+        islandColors.Clear();
+        zombieToIsland.Clear();
 
-        // ** Stage 1: Initial grid generation (populate map with islands) **
-        PopulateMap();  // custom method to fill the map with initial land/water configuration
+        PopulateMap();
 
-        // ** Stage 2: Cellular Automata Smoothing **
         for (int i = 0; i < 5; i++)
         {
             SmoothMap();
         }
 
-        // ** Stage 3: Final processing (cleanup and feature placement) **
         ProcessMap();
-        // Note: We skip adding a surrounding border of walls, because we want an open ocean boundary.
 
-        // Generate the mesh for visualization
         MeshGenerator meshGen = GetComponent<MeshGenerator>();
         meshGen.GenerateMesh(map, 1f);
+
+        AnalyzeMap();
     }
 
-    // Stage 1: Populate the map with initial islands
+
+    void RotateZombiesTowardLab()
+    {
+        if (currentLabInstance == null) return;
+
+        Vector3 labPos = currentLabInstance.transform.position;
+
+        foreach (var zombie in spawnedZombies)
+        {
+            if (zombie != null)
+            {
+                Vector3 dir = labPos - zombie.transform.position;
+                dir.y = 0; // Flatten for Y rotation only
+                if (dir != Vector3.zero)
+                {
+                    Quaternion rot = Quaternion.LookRotation(dir);
+                    zombie.transform.rotation = Quaternion.Slerp(zombie.transform.rotation, rot, Time.deltaTime * 2f);
+                }
+            }
+        }
+    }
+
+    void MoveZombiesRandomly()
+    {
+        foreach (var zombie in spawnedZombies)
+        {
+            if (zombie == null || !zombieToIsland.ContainsKey(zombie)) continue;
+
+            if (UnityEngine.Random.value < zombieMoveChance)
+            {
+                List<Vector2Int> islandTiles = zombieToIsland[zombie];
+                int index = UnityEngine.Random.Range(0, islandTiles.Count);
+                Vector2Int newCoord = islandTiles[index];
+                Vector3 newWorldPos = CoordToWorldPoint(newCoord.x, newCoord.y);
+                zombie.transform.position = Vector3.Lerp(zombie.transform.position, newWorldPos + Vector3.up * 0.5f, Time.deltaTime * 3f);
+            }
+        }
+    }
+
+    void AnalyzeMap()
+    {
+        int total = width * height;
+        int landCount = 0;
+        foreach (var val in map)
+            if (val == 1) landCount++;
+
+        float landPercent = (float)landCount / total * 100f;
+        Debug.Log($"Map Analysis: Land Coverage = {landPercent:F2}% ({landCount}/{total})");
+    }
+
+    Vector3 CoordToWorldPoint(int x, int y)
+    {
+        float worldX = -width / 2f + x + 0.5f;
+        float worldZ = -height / 2f + y + 0.5f;
+        return new Vector3(worldX, 0f, worldZ);
+    }
+
+    Vector2Int FindRegionCenter(List<Vector2Int> region)
+    {
+        if (region.Count == 0) return new Vector2Int(width / 2, height / 2);
+        long sumX = 0, sumY = 0;
+        foreach (var coord in region)
+        {
+            sumX += coord.x;
+            sumY += coord.y;
+        }
+        int avgX = (int)(sumX / region.Count);
+        int avgY = (int)(sumY / region.Count);
+        return new Vector2Int(avgX, avgY);
+    }
+
+    bool IsInMapRange(int x, int y)
+    {
+        return x >= 0 && x < width && y >= 0 && y < height;
+    }
+
     void PopulateMap()
     {
         if (useRandomSeed)
         {
-            // Use current time as seed for randomness if requested
             seed = Time.time.ToString();
         }
         System.Random prng = new System.Random(seed.GetHashCode());
 
-        // Start with all water
         for (int x = 0; x < width; x++)
         {
             for (int y = 0; y < height; y++)
             {
-                map[x, y] = 0; // 0 represents water
+                map[x, y] = 0; // Water
             }
         }
 
-        // Determine number of islands based on randomFillPercent and map size
-        int numIslands = Mathf.Max(1, Mathf.RoundToInt(Mathf.Lerp(1, 6, randomFillPercent / 100f)));
-        // We allow 1 to 6 islands (approx.) depending on desired land coverage
-        // Alternatively, use randomFillPercent more directly:
-        // numIslands = prng.Next(1, randomFillPercent/10 + 2);
+        int maxPossibleIslands = (width * height) / 300; // You can tweak this divisor to control density
+        int numIslands = Mathf.Clamp(
+            Mathf.RoundToInt(Mathf.Lerp(1, maxPossibleIslands, randomFillPercent / 100f)),
+            1, maxPossibleIslands
+        );
 
-        // For each island, pick a random center and radius, then fill in land
         for (int i = 0; i < numIslands; i++)
         {
-            // Pick a center position away from the map border (to avoid touching edges)
             int centerX = prng.Next(2, width - 2);
             int centerY = prng.Next(2, height - 2);
 
-            // Choose a random radius for the island (based on map size and desired coverage)
-            // Larger randomFillPercent -> potentially larger islands
             int maxRad = Mathf.Min(width, height) / 4;
             int minRad = Mathf.Max(2, maxRad / 2);
-			int radius;
+            int radius;
 
-			if (numIslands > 1)
-			{
-				int reducedMax = maxRad / numIslands + 2;
-				int effectiveMax = Mathf.Max(minRad + 1, reducedMax);
-				radius = prng.Next(minRad, effectiveMax);
-			}
-			else
-			{
-				radius = prng.Next(minRad, maxRad);
-			}
-            // if (numIslands > 1)
-            // {
-            //     // If many islands, reduce radius to spread land among them
-            //     radius = prng.Next(minRad, maxRad / numIslands + 2);
-            // }
+            if (numIslands > 1)
+            {
+                int reducedMax = maxRad / numIslands + 2;
+                int effectiveMax = Mathf.Max(minRad + 1, reducedMax);
+                radius = prng.Next(minRad, effectiveMax);
+            }
+            else
+            {
+                radius = prng.Next(minRad, maxRad);
+            }
 
-            // Fill a circle (or diamond) of land around the center
             for (int dx = -radius; dx <= radius; dx++)
             {
                 for (int dy = -radius; dy <= radius; dy++)
                 {
                     int nx = centerX + dx;
                     int ny = centerY + dy;
-                    if (IsInMapRange(nx, ny))
+                    if (IsInMapRange(nx, ny) && dx * dx + dy * dy <= radius * radius)
                     {
-                        // Check distance from center to keep a roughly circular shape
-                        if (dx * dx + dy * dy <= radius * radius)
-                        {
-                            map[nx, ny] = 1; // mark as land
-                        }
+                        map[nx, ny] = 1;
                     }
                 }
             }
         }
-
-        // (Optional shaping) We could introduce some randomness in island shapes here.
-        // For example, randomly remove a few land tiles to create rough edges:
-        // Iterate through map and for each land tile on the edge of an island,
-        // have a small chance to set it to water. This can create bays or inlets.
-        // We'll rely mostly on the smoothing step to irregularize the coastlines.
     }
 
-    // Stage 2: Smooth the map using cellular automata rules
     void SmoothMap()
     {
         int[,] newMap = new int[width, height];
@@ -152,153 +264,27 @@ public class MapGenerator : MonoBehaviour
                 else if (neighborLandTiles < 4)
                     newMap[x, y] = 0;
                 else
-                    newMap[x, y] = map[x, y]; // if exactly 4 neighbors, remain the same
+                    newMap[x, y] = map[x, y];
             }
         }
         map = newMap;
     }
 
-    // Count the number of neighboring cells that are land (1) around a given cell
     int GetSurroundingLandCount(int gridX, int gridY)
     {
         int landCount = 0;
-        for (int neighborX = gridX - 1; neighborX <= gridX + 1; neighborX++)
+        for (int x = gridX - 1; x <= gridX + 1; x++)
         {
-            for (int neighborY = gridY - 1; neighborY <= gridY + 1; neighborY++)
+            for (int y = gridY - 1; y <= gridY + 1; y++)
             {
-                if (neighborX == gridX && neighborY == gridY) continue; // skip itself
-
-                if (IsInMapRange(neighborX, neighborY))
-                {
-                    landCount += map[neighborX, neighborY]; // add 1 for land, 0 for water
-                }
-                else
-                {
-                    // Outside map bounds: treat as water (do not count as land)
-                    // (This ensures edges don't count imaginary land beyond the border)
-                    // landCount += 1; // [Original cave logic would count out-of-bounds as land]
-                }
+                if (x == gridX && y == gridY) continue;
+                if (IsInMapRange(x, y))
+                    landCount += map[x, y];
             }
         }
         return landCount;
     }
 
-    bool IsInMapRange(int x, int y)
-    {
-        return x >= 0 && x < width && y >= 0 && y < height;
-    }
-
-    // Stage 3: Process the map to finalize level
-    void ProcessMap()
-    {
-        // 1. Ensure map border is water (clear any land on the outermost edges)
-        for (int x = 0; x < width; x++)
-        {
-            map[x, 0] = 0;
-            map[x, height - 1] = 0;
-        }
-        for (int y = 0; y < height; y++)
-        {
-            map[0, y] = 0;
-            map[width - 1, y] = 0;
-        }
-
-        // 2. Remove small isolated land regions (small islands)
-        List<List<Vector2Int>> landRegions = GetRegions(1); // get all land regions (1 = land)
-        int landThresholdSize = 10;  // minimum size for an island to survive
-        List<Vector2Int> largestLand = null;
-        int largestLandSize = 0;
-        foreach (var region in landRegions)
-        {
-            if (region.Count > largestLandSize)
-            {
-                largestLandSize = region.Count;
-                largestLand = region;
-            }
-        }
-        foreach (var region in landRegions)
-        {
-            if (region.Count < landThresholdSize)
-            {
-                // If this region is below threshold and is not the largest region (to keep at least one island)
-                if (region != largestLand || landRegions.Count > 1)
-                {
-                    // Convert all these land cells to water
-                    foreach (var coord in region)
-                    {
-                        map[coord.x, coord.y] = 0;
-                    }
-                }
-            }
-        }
-        // Note: If all islands were below threshold, we spared the largest one above to avoid removing all land.
-
-        // 3. Remove small isolated water regions (fill small lakes inside islands)
-        List<List<Vector2Int>> waterRegions = GetRegions(0); // all water regions (0 = water)
-        int waterThresholdSize = 10; // minimum size for a water region to be considered a lake
-        foreach (var region in waterRegions)
-        {
-            // Skip the "ocean" (any region touching the border is ocean, not an inland lake)
-            bool isOcean = false;
-            foreach (var coord in region)
-            {
-                if (coord.x == 0 || coord.x == width - 1 || coord.y == 0 || coord.y == height - 1)
-                {
-                    isOcean = true;
-                    break;
-                }
-            }
-            if (isOcean) 
-                continue; // don't fill the ocean or any water connected to the border
-
-            if (region.Count < waterThresholdSize)
-            {
-                // Fill small lake with land
-                foreach (var coord in region)
-                {
-                    map[coord.x, coord.y] = 1;
-                }
-            }
-        }
-
-        // 4. (Optional) Place the research lab on the largest island
-        if (labPrefab != null)
-		{
-			// Destroy previously spawned lab
-			if (currentLabInstance != null)
-			{
-				Destroy(currentLabInstance);
-			}
-
-			if (largestLand == null)
-			{
-				// Recompute largest land region after removals if needed
-				landRegions = GetRegions(1);
-				foreach (var region in landRegions)
-				{
-					if (region.Count > largestLandSize)
-					{
-						largestLandSize = region.Count;
-						largestLand = region;
-					}
-				}
-			}
-
-			if (largestLand != null && largestLand.Count > 0)
-			{
-				// Find center of selected island
-				Vector2Int labPosition = FindRegionCenter(largestLand);
-				Vector3 labWorldPos = CoordToWorldPoint(labPosition.x, labPosition.y);
-
-				// Instantiate and track the lab
-				currentLabInstance = Instantiate(labPrefab, labWorldPos, Quaternion.identity);
-			}
-		}
-
-    }
-
-    // Get all regions (connected components) of a given cell type (0 for water, 1 for land).
-    // Uses flood-fill (BFS/DFS) to collect connected cells.
     List<List<Vector2Int>> GetRegions(int tileType)
     {
         List<List<Vector2Int>> regions = new List<List<Vector2Int>>();
@@ -310,27 +296,23 @@ public class MapGenerator : MonoBehaviour
             {
                 if (!visited[x, y] && map[x, y] == tileType)
                 {
-                    // Found a new region via an unvisited cell
                     List<Vector2Int> region = new List<Vector2Int>();
                     Queue<Vector2Int> queue = new Queue<Vector2Int>();
                     queue.Enqueue(new Vector2Int(x, y));
                     visited[x, y] = true;
 
-                    // BFS flood fill
                     while (queue.Count > 0)
                     {
                         Vector2Int coord = queue.Dequeue();
                         region.Add(coord);
 
-                        // Check 4-neighbors for connectivity (up, down, left, right)
-                        List<Vector2Int> neighbors = new List<Vector2Int>()
+                        foreach (var n in new Vector2Int[]
                         {
                             new Vector2Int(coord.x + 1, coord.y),
                             new Vector2Int(coord.x - 1, coord.y),
                             new Vector2Int(coord.x, coord.y + 1),
                             new Vector2Int(coord.x, coord.y - 1)
-                        };
-                        foreach (Vector2Int n in neighbors)
+                        })
                         {
                             if (IsInMapRange(n.x, n.y) && !visited[n.x, n.y] && map[n.x, n.y] == tileType)
                             {
@@ -347,43 +329,88 @@ public class MapGenerator : MonoBehaviour
         return regions;
     }
 
-    // Helper to find an approximate center of a region (by average position)
-    Vector2Int FindRegionCenter(List<Vector2Int> region)
+    void ProcessMap()
     {
-        if (region.Count == 0) return new Vector2Int(width/2, height/2);
-        long sumX = 0, sumY = 0;
-        foreach (var coord in region)
+        for (int x = 0; x < width; x++)
         {
-            sumX += coord.x;
-            sumY += coord.y;
+            map[x, 0] = 0;
+            map[x, height - 1] = 0;
         }
-        int avgX = (int)(sumX / region.Count);
-        int avgY = (int)(sumY / region.Count);
-
-        // Find the region cell closest to the average point
-        Vector2Int center = region[0];
-        float minDist = float.MaxValue;
-        foreach (var coord in region)
+        for (int y = 0; y < height; y++)
         {
-            float dx = coord.x - avgX;
-            float dy = coord.y - avgY;
-            float dist = dx * dx + dy * dy;
-            if (dist < minDist)
+            map[0, y] = 0;
+            map[width - 1, y] = 0;
+        }
+
+        List<List<Vector2Int>> landRegions = GetRegions(1);
+        int landThresholdSize = 10;
+
+        islandRegions.Clear();
+        islandColors.Clear();
+
+        List<List<Vector2Int>> validIslands = new List<List<Vector2Int>>();
+        List<Vector2Int> largestLand = null;
+        int largestSize = 0;
+
+        foreach (var region in landRegions)
+        {
+            if (region.Count >= landThresholdSize)
             {
-                minDist = dist;
-                center = coord;
+                validIslands.Add(region);
+                islandRegions.Add(region);
+                islandColors.Add(UnityEngine.Random.ColorHSV(0f, 1f, 0.7f, 1f, 0.7f, 1f));
+                if (region.Count > largestSize)
+                {
+                    largestSize = region.Count;
+                    largestLand = region;
+                }
+            }
+            else if (region != largestLand || landRegions.Count > 1)
+            {
+                foreach (var coord in region)
+                    map[coord.x, coord.y] = 0;
             }
         }
-        return center;
-    }
 
-    // Convert a grid coordinate (x,y) to a world position (for object placement).
-    // Assumes the mesh is centered at (0,0) in XZ plane and each tile = 1 unit.
-    Vector3 CoordToWorldPoint(int x, int y)
-    {
-        // Map is centered at (0,0) in world, with width and height in X and Z axes.
-        float worldX = -width / 2f + x + 0.5f;
-        float worldZ = -height / 2f + y + 0.5f;
-        return new Vector3(worldX, 0f, worldZ);
+        // Place lab and zombies
+        if (labPrefab != null && validIslands.Count > 0)
+        {
+            if (currentLabInstance != null)
+                Destroy(currentLabInstance);
+            foreach (var zombie in spawnedZombies)
+                Destroy(zombie);
+            spawnedZombies.Clear();
+            zombieToIsland.Clear();
+
+            System.Random prng = new System.Random(seed.GetHashCode());
+            int labIndex = prng.Next(0, validIslands.Count);
+            List<Vector2Int> labIsland = validIslands[labIndex];
+
+            Vector2Int labPos = FindRegionCenter(labIsland);
+            Vector3 labWorldPos = CoordToWorldPoint(labPos.x, labPos.y);
+            currentLabInstance = Instantiate(labPrefab, labWorldPos, Quaternion.identity);
+            currentLabInstance.name = "ResearchLab";
+
+            for (int i = 0; i < validIslands.Count; i++)
+            {
+                if (i == labIndex) continue;
+                List<Vector2Int> island = validIslands[i];
+                for (int j = 0; j < zombiesPerIsland; j++)
+                {
+                    int zIndex = prng.Next(0, island.Count);
+                    Vector2Int zPos = island[zIndex];
+                    Vector3 zWorldPos = CoordToWorldPoint(zPos.x, zPos.y);
+                    GameObject zombie = Instantiate(zombiePrefab, zWorldPos + Vector3.up * 0.5f, Quaternion.identity);
+                    zombie.name = $"Zombie_{i}_{j}";
+                    spawnedZombies.Add(zombie);
+                    zombieToIsland[zombie] = island;
+                }
+            }
+            
+        }
     }
 }
+
+
+
+    
