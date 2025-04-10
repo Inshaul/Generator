@@ -2,76 +2,75 @@ using UnityEngine;
 using System;
 using System.Collections.Generic;
 
+/// <summary>
+/// Procedural generation for a zombie apocalypse scenario on an archipelago.
+/// Generates islands, places a lab, spawns zombies and a player, adds trees, and handles simple zombie movement.
+/// </summary>
 public class MapGenerator : MonoBehaviour
 {
     [Header("Map Dimensions")]
-    public int width;
-    public int height;
+    public int width;  // Width of the map grid
+    public int height; // Height of the map grid
 
     [Header("Random Seed Controls")]
-    public string seed;
-    public bool useRandomSeed;
+    public string seed;             // Seed for deterministic generation
+    public bool useRandomSeed;     // Use a random seed if true
     [Range(0, 100)]
-    public int randomFillPercent;
+    public int randomFillPercent;  // % of the grid initially filled with land
 
     [Header("Optional Prefabs")]
-    public GameObject labPrefab;
-    public GameObject zombiePrefab;
-    public int zombiesPerIsland = 2;
-    public bool allowZombieWandering = true;
-    [Range(0f, 1f)] public float zombieMoveChance = 0.02f;
+    public GameObject labPrefab;       // Yellow cube with light (goal)
+    public GameObject zombiePrefab;    // Red cube (enemy)
+    public int zombiesPerIsland = 2;   // Deprecated: use density-based spawning
+    public bool allowZombieWandering = true; // Toggle zombie movement
+    [Range(0f, 1f)] public float zombieMoveChance = 0.02f; // Chance to choose a new target
+    [Range(0.001f, 0.05f)] public float zombieDensityFactor = 0.01f; // Zombies per tile
+    public int minZombiesPerIsland = 1; // Lower bound
+    public int maxZombiesPerIsland = 10; // Upper bound
 
-    [Range(0.001f, 0.05f)] public float zombieDensityFactor = 0.01f;
-    public int minZombiesPerIsland = 1;
-    public int maxZombiesPerIsland = 10;
-
-
-    private int[,] map;
-    private GameObject currentLabInstance;
-    private List<GameObject> spawnedZombies = new List<GameObject>();
-    private Dictionary<GameObject, List<Vector2Int>> zombieToIsland = new Dictionary<GameObject, List<Vector2Int>>();
-
-    private Dictionary<GameObject, Vector3> zombieTargetPositions = new Dictionary<GameObject, Vector3>();
+    private int[,] map; // 2D map grid, 1 = land, 0 = water
+    private GameObject currentLabInstance; // Spawned lab reference
+    private List<GameObject> spawnedZombies = new(); // All zombies
+    private Dictionary<GameObject, List<Vector2Int>> zombieToIsland = new(); // Which island each zombie belongs to
+    private Dictionary<GameObject, Vector3> zombieTargetPositions = new(); // Where each zombie is walking toward
 
     [Range(0.1f, 5f)]
-    public float zombieMoveSpeed = 1f;
+    public float zombieMoveSpeed = 1f; // Speed zombies walk
 
-    // [Gizmos]
-    private List<List<Vector2Int>> islandRegions = new List<List<Vector2Int>>();
-    private List<Color> islandColors = new List<Color>();
-
+    private List<List<Vector2Int>> islandRegions = new(); // Store islands for spawning
+    private List<Color> islandColors = new(); // For drawing islands with Gizmos
 
     [Header("Player Settings")]
-    public GameObject playerPrefab;
+    public GameObject playerPrefab; // Player (cylinder + light)
     private GameObject currentPlayerInstance;
 
-    private Dictionary<GameObject, Vector3> zombieTargets = new Dictionary<GameObject, Vector3>();
+    public GameObject treePrefab; // Tree decoration (green sphere)
+    [Range(0, 1f)] public float treeSpawnChance = 0.1f; // 10% chance to spawn on each land tile
+    private List<GameObject> spawnedTrees = new(); // Keep track of spawned trees
 
-    public GameObject treePrefab;
-    [Range(0, 1f)] public float treeSpawnChance = 0.1f; // 10% of land tiles
+    // Unity calls this once on scene start
+    void Start() => GenerateMap();
 
-    private List<GameObject> spawnedTrees = new List<GameObject>();
-
-    void Start()
-    {
-        GenerateMap();
-    }
-
+    // Unity calls this every frame
     void Update()
     {
+        // Left-click to regenerate the map during Play mode
         if (Input.GetMouseButtonDown(0))
         {
             GenerateMap();
         }
 
+        // Make zombies rotate toward the lab
         RotateZombiesTowardLab();
 
+        // Move zombies if wandering is enabled
         if (allowZombieWandering)
         {
             MoveZombiesRandomly();
         }
     }
 
+    // Draws a debug view of the map in the Scene view
     void OnDrawGizmos()
     {
         if (map == null) return;
@@ -81,9 +80,9 @@ public class MapGenerator : MonoBehaviour
             for (int y = 0; y < height; y++)
             {
                 Vector3 pos = CoordToWorldPoint(x, y);
+
                 if (map[x, y] == 1)
                 {
-                    // Land: Color by region
                     for (int i = 0; i < islandRegions.Count; i++)
                     {
                         if (islandRegions[i].Contains(new Vector2Int(x, y)))
@@ -96,20 +95,20 @@ public class MapGenerator : MonoBehaviour
                 }
                 else
                 {
-                    Gizmos.color = Color.cyan;
+                    Gizmos.color = Color.cyan; // Water
                     Gizmos.DrawCube(pos, Vector3.one * 0.9f);
                 }
             }
         }
 
-        // Lab Gizmo
+        // Draw lab as a blue sphere
         if (currentLabInstance != null)
         {
             Gizmos.color = Color.blue;
             Gizmos.DrawSphere(currentLabInstance.transform.position + Vector3.up * 1.5f, 0.5f);
         }
 
-        // Zombies Gizmo
+        // Draw zombies as red spheres
         Gizmos.color = Color.red;
         foreach (var z in spawnedZombies)
         {
@@ -118,6 +117,7 @@ public class MapGenerator : MonoBehaviour
         }
     }
 
+    // Handles the entire map generation pipeline
     void GenerateMap()
     {
         map = new int[width, height];
@@ -125,22 +125,22 @@ public class MapGenerator : MonoBehaviour
         islandColors.Clear();
         zombieToIsland.Clear();
 
-        PopulateMap();
+        PopulateMap(); // Stage 1 - Create base map
 
         for (int i = 0; i < 5; i++)
         {
-            SmoothMap();
+            SmoothMap(); // Stage 2 - Cellular Automata
         }
 
-        ProcessMap();
+        ProcessMap(); // Stage 3 - Remove small regions and place objects
 
         MeshGenerator meshGen = GetComponent<MeshGenerator>();
-        meshGen.GenerateMesh(map, 1f);
+        meshGen.GenerateMesh(map, 1f); // Rebuild mesh from map
 
-        AnalyzeMap();
+        AnalyzeMap(); // Debug logging
     }
 
-
+    // Makes zombies rotate to face the lab
     void RotateZombiesTowardLab()
     {
         if (currentLabInstance == null) return;
@@ -152,7 +152,7 @@ public class MapGenerator : MonoBehaviour
             if (zombie != null)
             {
                 Vector3 dir = labPos - zombie.transform.position;
-                dir.y = 0; // Flatten for Y rotation only
+                dir.y = 0; // Don't tilt the zombie up/down
                 if (dir != Vector3.zero)
                 {
                     Quaternion rot = Quaternion.LookRotation(dir);
@@ -162,6 +162,7 @@ public class MapGenerator : MonoBehaviour
         }
     }
 
+    // Moves zombies toward a random point on their island
     void MoveZombiesRandomly()
     {
         foreach (var zombie in spawnedZombies)
@@ -171,14 +172,13 @@ public class MapGenerator : MonoBehaviour
             Vector3 currentPos = zombie.transform.position;
             Vector3 targetPos = zombieTargetPositions[zombie];
 
-            // Move smoothly toward target
+            // Move towards the current target
             zombie.transform.position = Vector3.MoveTowards(currentPos, targetPos, zombieMoveSpeed * Time.deltaTime);
 
-            // If close to target, pick a new one
+            // If near target, choose a new one
             if (Vector3.Distance(currentPos, targetPos) < 0.1f)
             {
                 List<Vector2Int> islandTiles = zombieToIsland[zombie];
-
                 List<Vector2Int> validTiles = islandTiles.FindAll(tile => IsInMapRange(tile.x, tile.y) && map[tile.x, tile.y] == 1);
                 if (validTiles.Count == 0) continue;
 
@@ -190,6 +190,7 @@ public class MapGenerator : MonoBehaviour
         }
     }
 
+    // Logs how much land exists in the generated map
     void AnalyzeMap()
     {
         int total = width * height;
@@ -201,6 +202,7 @@ public class MapGenerator : MonoBehaviour
         Debug.Log($"Map Analysis: Land Coverage = {landPercent:F2}% ({landCount}/{total})");
     }
 
+    // Converts grid coordinates to Unity world space
     Vector3 CoordToWorldPoint(int x, int y)
     {
         float worldX = -width / 2f + x + 0.5f;
@@ -208,6 +210,7 @@ public class MapGenerator : MonoBehaviour
         return new Vector3(worldX, 0f, worldZ);
     }
 
+    // Computes the average position of a region to find its "center"
     Vector2Int FindRegionCenter(List<Vector2Int> region)
     {
         if (region.Count == 0) return new Vector2Int(width / 2, height / 2);
@@ -217,38 +220,38 @@ public class MapGenerator : MonoBehaviour
             sumX += coord.x;
             sumY += coord.y;
         }
-        int avgX = (int)(sumX / region.Count);
-        int avgY = (int)(sumY / region.Count);
-        return new Vector2Int(avgX, avgY);
+        return new Vector2Int((int)(sumX / region.Count), (int)(sumY / region.Count));
     }
 
+    // Checks if a given coordinate is within the map bounds
     bool IsInMapRange(int x, int y)
     {
         return x >= 0 && x < width && y >= 0 && y < height;
     }
 
+    // Randomly scatters circular islands across the grid
     void PopulateMap()
     {
         if (useRandomSeed)
         {
-            seed = Time.time.ToString();
+            seed = Time.time.ToString(); // New seed each run
         }
         System.Random prng = new System.Random(seed.GetHashCode());
 
+        // Initialize everything to water
         for (int x = 0; x < width; x++)
         {
             for (int y = 0; y < height; y++)
             {
-                map[x, y] = 0; // Water
+                map[x, y] = 0;
             }
         }
 
-        int maxPossibleIslands = (width * height) / 300; // You can tweak this divisor to control density
-        int numIslands = Mathf.Clamp(
-            Mathf.RoundToInt(Mathf.Lerp(1, maxPossibleIslands, randomFillPercent / 100f)),
-            1, maxPossibleIslands
-        );
+        // Calculate number of islands to create
+        int maxPossibleIslands = (width * height) / 300;
+        int numIslands = Mathf.Clamp(Mathf.RoundToInt(Mathf.Lerp(1, maxPossibleIslands, randomFillPercent / 100f)), 1, maxPossibleIslands);
 
+        // Spawn islands as filled circles
         for (int i = 0; i < numIslands; i++)
         {
             int centerX = prng.Next(2, width - 2);
@@ -269,6 +272,7 @@ public class MapGenerator : MonoBehaviour
                 radius = prng.Next(minRad, maxRad);
             }
 
+            // Fill circle
             for (int dx = -radius; dx <= radius; dx++)
             {
                 for (int dy = -radius; dy <= radius; dy++)
@@ -284,6 +288,7 @@ public class MapGenerator : MonoBehaviour
         }
     }
 
+    // Applies cellular automata smoothing to make landmasses cohesive
     void SmoothMap()
     {
         int[,] newMap = new int[width, height];
@@ -303,6 +308,7 @@ public class MapGenerator : MonoBehaviour
         map = newMap;
     }
 
+    // Counts how many surrounding tiles are land
     int GetSurroundingLandCount(int gridX, int gridY)
     {
         int landCount = 0;
@@ -318,9 +324,10 @@ public class MapGenerator : MonoBehaviour
         return landCount;
     }
 
+    // Finds all contiguous regions of a given tile type (land or water)
     List<List<Vector2Int>> GetRegions(int tileType)
     {
-        List<List<Vector2Int>> regions = new List<List<Vector2Int>>();
+        List<List<Vector2Int>> regions = new();
         bool[,] visited = new bool[width, height];
 
         for (int x = 0; x < width; x++)
@@ -329,8 +336,8 @@ public class MapGenerator : MonoBehaviour
             {
                 if (!visited[x, y] && map[x, y] == tileType)
                 {
-                    List<Vector2Int> region = new List<Vector2Int>();
-                    Queue<Vector2Int> queue = new Queue<Vector2Int>();
+                    List<Vector2Int> region = new();
+                    Queue<Vector2Int> queue = new();
                     queue.Enqueue(new Vector2Int(x, y));
                     visited[x, y] = true;
 
@@ -362,9 +369,10 @@ public class MapGenerator : MonoBehaviour
         return regions;
     }
 
+       // Final map cleanup and game object placement
     void ProcessMap()
     {
-        // 1. Ensure map border is water
+        // 1. Set all map borders to water to ensure isolation
         for (int x = 0; x < width; x++)
         {
             map[x, 0] = 0;
@@ -376,7 +384,7 @@ public class MapGenerator : MonoBehaviour
             map[width - 1, y] = 0;
         }
 
-        // 2. Remove small land regions
+        // 2. Remove small land patches (less than threshold)
         List<List<Vector2Int>> landRegions = GetRegions(1);
         int landThresholdSize = 10;
         List<Vector2Int> largestLand = null;
@@ -391,17 +399,14 @@ public class MapGenerator : MonoBehaviour
         }
         foreach (var region in landRegions)
         {
-            if (region.Count < landThresholdSize)
+            if (region.Count < landThresholdSize && (region != largestLand || landRegions.Count > 1))
             {
-                if (region != largestLand || landRegions.Count > 1)
-                {
-                    foreach (var coord in region)
-                        map[coord.x, coord.y] = 0;
-                }
+                foreach (var coord in region)
+                    map[coord.x, coord.y] = 0;
             }
         }
 
-        // 3. Fill small lakes
+        // 3. Fill small lakes (water regions not touching edges)
         List<List<Vector2Int>> waterRegions = GetRegions(0);
         int waterThresholdSize = 10;
         foreach (var region in waterRegions)
@@ -415,57 +420,51 @@ public class MapGenerator : MonoBehaviour
                     break;
                 }
             }
-            if (isOcean) continue;
-
-            if (region.Count < waterThresholdSize)
+            if (!isOcean && region.Count < waterThresholdSize)
             {
                 foreach (var coord in region)
                     map[coord.x, coord.y] = 1;
             }
         }
 
-        // 4. === LAB & ZOMBIE PLACEMENT ===
+        // === Lab and Zombie Placement ===
         if (labPrefab != null)
         {
             if (currentLabInstance != null)
                 Destroy(currentLabInstance);
 
+            // Remove old zombies
             foreach (var zombie in spawnedZombies)
                 Destroy(zombie);
             spawnedZombies.Clear();
 
             landRegions = GetRegions(1);
-            List<List<Vector2Int>> validIslands = new List<List<Vector2Int>>();
+            List<List<Vector2Int>> validIslands = new();
             foreach (var region in landRegions)
             {
                 if (region.Count >= landThresholdSize)
                     validIslands.Add(region);
             }
 
-            if (validIslands.Count == 0)
-                return;
+            if (validIslands.Count == 0) return;
 
             System.Random prng = new System.Random(seed.GetHashCode());
             int labIslandIndex = prng.Next(0, validIslands.Count);
             List<Vector2Int> labIsland = validIslands[labIslandIndex];
 
+            // Place lab at island center or fallback to random land tile
             Vector2Int labPos = FindRegionCenter(labIsland);
-            // Ensure the chosen tile is on land
             if (map[labPos.x, labPos.y] != 1)
-            {
-                // Pick a fallback from within the island region (should be land)
                 labPos = labIsland[prng.Next(0, labIsland.Count)];
-            }
             Vector3 labWorldPos = CoordToWorldPoint(labPos.x, labPos.y);
             currentLabInstance = Instantiate(labPrefab, labWorldPos, Quaternion.identity);
             currentLabInstance.name = "ResearchLab";
 
-            // Zombies on other islands
+            // Spawn zombies on all islands (including lab's)
             for (int i = 0; i < validIslands.Count; i++)
             {
                 List<Vector2Int> island = validIslands[i];
 
-                // Scale number of zombies based on island size
                 int rawZombieCount = Mathf.RoundToInt(island.Count * zombieDensityFactor);
                 int clampedCount = Mathf.Clamp(rawZombieCount, minZombiesPerIsland, maxZombiesPerIsland);
 
@@ -478,22 +477,22 @@ public class MapGenerator : MonoBehaviour
                     zombie.name = $"Zombie_{i}_{j}";
                     spawnedZombies.Add(zombie);
 
+                    // Register zombie
                     if (!zombieToIsland.ContainsKey(zombie))
                         zombieToIsland[zombie] = island;
                     zombieTargetPositions[zombie] = zWorldPos;
                 }
             }
-            // 5. === PLAYER SPAWNING ===
+
+            // === Player Spawn on Safest Island ===
             if (playerPrefab != null)
             {
                 if (currentPlayerInstance != null)
                     Destroy(currentPlayerInstance);
 
-                Dictionary<int, int> zombieCounts = new Dictionary<int, int>();
-                for (int i = 0; i < validIslands.Count; i++)
-                    zombieCounts[i] = 0;
+                Dictionary<int, int> zombieCounts = new();
+                for (int i = 0; i < validIslands.Count; i++) zombieCounts[i] = 0;
 
-                // Count zombies per island
                 foreach (var kvp in zombieToIsland)
                 {
                     int index = validIslands.IndexOf(kvp.Value);
@@ -501,13 +500,11 @@ public class MapGenerator : MonoBehaviour
                         zombieCounts[index]++;
                 }
 
-                // Pick the non-lab island with the fewest zombies
                 int safestIslandIndex = -1;
                 int minZombies = int.MaxValue;
                 for (int i = 0; i < validIslands.Count; i++)
                 {
                     if (i == labIslandIndex) continue;
-
                     if (zombieCounts[i] < minZombies)
                     {
                         minZombies = zombieCounts[i];
@@ -526,10 +523,10 @@ public class MapGenerator : MonoBehaviour
             }
         }
 
-        // === TREE DECORATION ===
+        // === Tree Decoration on Land Tiles ===
         if (treePrefab != null)
         {
-            // Remove previously spawned trees
+            // Remove previous trees
             foreach (var tree in spawnedTrees)
             {
                 if (tree != null)
@@ -539,6 +536,7 @@ public class MapGenerator : MonoBehaviour
 
             System.Random prng = new System.Random(seed.GetHashCode());
 
+            // Randomly place trees on land
             for (int x = 0; x < width; x++)
             {
                 for (int y = 0; y < height; y++)
@@ -554,8 +552,8 @@ public class MapGenerator : MonoBehaviour
             }
         }
     }
-
 }
+
 
 
 
