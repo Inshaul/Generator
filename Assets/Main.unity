@@ -474,6 +474,11 @@ MonoBehaviour:
   playerPrefab: {fileID: 6547322782340710972, guid: 891fe33ec63add843aacf1f6e0bef049, type: 3}
   treePrefab: {fileID: 6547322782340710972, guid: 2ebd9ad93cec98e44910107c9d7f314c, type: 3}
   treeSpawnChance: 0.046
+  civilianPrefab: {fileID: 6547322782340710972, guid: bb3d7dfaa88b3cc4c94e73d691c977e5, type: 3}
+  civiliansPerIsland: 1
+  civilianFleeDistance: 3
+  civilianMoveSpeed: 1.5
+  zombieChaseRange: 4
 --- !u!4 &723202080
 Transform:
   m_ObjectHideFlags: 0

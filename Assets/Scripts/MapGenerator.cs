@@ -48,6 +48,16 @@ public class MapGenerator : MonoBehaviour
     [Range(0, 1f)] public float treeSpawnChance = 0.1f; // 10% chance to spawn on each land tile
     private List<GameObject> spawnedTrees = new(); // Keep track of spawned trees
 
+    [Header("Civilian Settings")]
+    public GameObject civilianPrefab; // Prefab for civilians
+    public int civiliansPerIsland = 1; // Number of civilians per island
+    public float civilianFleeDistance = 3f; // Distance at which civilians flee
+    public float civilianMoveSpeed = 1.5f; // Speed at which civilians move
+    public float zombieChaseRange = 4f; // Distance zombies detect and chase civilians
+
+    private List<GameObject> spawnedCivilians = new List<GameObject>();
+    private Dictionary<GameObject, Vector3> civilianTargets = new Dictionary<GameObject, Vector3>();
+
     // Unity calls this once on scene start
     void Start() => GenerateMap();
 
@@ -64,9 +74,102 @@ public class MapGenerator : MonoBehaviour
         RotateZombiesTowardLab();
 
         // Move zombies if wandering is enabled
-        if (allowZombieWandering)
+        // if (allowZombieWandering)
+        // {
+        //     MoveZombiesRandomly();
+        // }
+
+        MoveCivilians();
+        MoveZombiesWithChase();
+    }
+
+    void MoveCivilians()
+    {
+        foreach (var civilian in spawnedCivilians)
         {
-            MoveZombiesRandomly();
+            if (civilian == null) continue;
+
+            Vector3 currentPos = civilian.transform.position;
+            Vector3 targetPos = civilianTargets[civilian];
+
+            // Flee if any zombie is too close
+            bool fleeing = false;
+            foreach (var zombie in spawnedZombies)
+            {
+                if (zombie == null) continue;
+                float dist = Vector3.Distance(zombie.transform.position, currentPos);
+                if (dist < civilianFleeDistance)
+                {
+                    Vector3 fleeDir = (currentPos - zombie.transform.position).normalized;
+                    targetPos = currentPos + fleeDir * 3f;
+                    fleeing = true;
+                    break;
+                }
+            }
+
+            // Move the civilian
+            civilian.transform.position = Vector3.MoveTowards(currentPos, targetPos, civilianMoveSpeed * Time.deltaTime);
+
+            // Pick a new idle target when not fleeing
+            if (!fleeing && Vector3.Distance(currentPos, targetPos) < 0.2f)
+            {
+                if (zombieToIsland.TryGetValue(civilian, out var island))
+                {
+                    var validTiles = island.FindAll(tile => map[tile.x, tile.y] == 1);
+                    if (validTiles.Count > 0)
+                    {
+                        var coord = validTiles[UnityEngine.Random.Range(0, validTiles.Count)];
+                        civilianTargets[civilian] = CoordToWorldPoint(coord.x, coord.y) + Vector3.up * 0.5f;
+                    }
+                }
+            }
+        }
+    }
+
+
+    void MoveZombiesWithChase()
+    {
+        foreach (var zombie in spawnedZombies)
+        {
+            if (zombie == null || !zombieToIsland.ContainsKey(zombie)) continue;
+
+            Vector3 currentPos = zombie.transform.position;
+            Vector3 targetPos = zombieTargetPositions[zombie];
+
+            // Chase nearest civilian if within range
+            GameObject nearestCivilian = null;
+            float minDist = float.MaxValue;
+            foreach (var civilian in spawnedCivilians)
+            {
+                if (civilian == null) continue;
+                float dist = Vector3.Distance(civilian.transform.position, currentPos);
+                if (dist < zombieChaseRange && dist < minDist)
+                {
+                    minDist = dist;
+                    nearestCivilian = civilian;
+                }
+            }
+
+            // Set chase or random target
+            if (nearestCivilian != null)
+            {
+                targetPos = nearestCivilian.transform.position;
+                zombieTargetPositions[zombie] = targetPos;
+            }
+
+            zombie.transform.position = Vector3.MoveTowards(currentPos, targetPos, zombieMoveSpeed * Time.deltaTime);
+
+            // Pick a new patrol target if idle
+            if (Vector3.Distance(currentPos, targetPos) < 0.2f && nearestCivilian == null)
+            {
+                List<Vector2Int> islandTiles = zombieToIsland[zombie];
+                var validTiles = islandTiles.FindAll(tile => map[tile.x, tile.y] == 1);
+                if (validTiles.Count > 0)
+                {
+                    var coord = validTiles[UnityEngine.Random.Range(0, validTiles.Count)];
+                    zombieTargetPositions[zombie] = CoordToWorldPoint(coord.x, coord.y) + Vector3.up * 0.5f;
+                }
+            }
         }
     }
 
@@ -481,6 +584,29 @@ public class MapGenerator : MonoBehaviour
                     if (!zombieToIsland.ContainsKey(zombie))
                         zombieToIsland[zombie] = island;
                     zombieTargetPositions[zombie] = zWorldPos;
+                }
+            }
+
+            if (civilianPrefab != null)
+            {
+                foreach (var civilian in spawnedCivilians)
+                    if (civilian != null) Destroy(civilian);
+                spawnedCivilians.Clear();
+                civilianTargets.Clear();
+
+                for (int i = 0; i < validIslands.Count; i++)
+                {
+                    var island = validIslands[i];
+                    for (int j = 0; j < civiliansPerIsland; j++)
+                    {
+                        Vector2Int cPos = island[UnityEngine.Random.Range(0, island.Count)];
+                        Vector3 worldPos = CoordToWorldPoint(cPos.x, cPos.y) + Vector3.up * 0.5f;
+                        GameObject civilian = Instantiate(civilianPrefab, worldPos, Quaternion.identity);
+                        civilian.name = $"Civilian_{i}_{j}";
+                        spawnedCivilians.Add(civilian);
+                        civilianTargets[civilian] = worldPos;
+                        zombieToIsland[civilian] = island;
+                    }
                 }
             }
 
