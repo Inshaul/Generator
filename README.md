@@ -1,170 +1,169 @@
-# Generator
+# Zombie Archipelago Procedural Level Generator - Mohammad Inshaul Haque (240406998)
 
-## Overview
+## Project Overview
 
-This Unity project implements a procedural 2D level generator designed around the theme of a **zombie apocalypse** taking place on an **archipelago of islands**. The player begins as a lone survivor attempting to navigate the fragmented world in search of a mysterious, glowing **abandoned research lab**, while **autonomous zombie agents** roam across islands and even **chase civilians** if spotted. The level layout, enemies, environment, and game objects are generated procedurally, with no hand-authored scenes.
+This Unity project implements a procedurally generated level based on a zombie apocalypse scenario where a player navigates an archipelago of islands in search of a glowing research lab. The level dynamically spawns terrain (islands and water), gameplay elements (zombies, civilians, player), and visual props (trees) to create a rich simulation without requiring a full game loop.
 
-The level is created in three stages as per the ECS7016P coursework guidelines:
-
-1. **Stage 1**: Random grid initialization using a fill percentage.
-2. **Stage 2**: Cellular Automata smoothing to form natural island shapes.
-3. **Stage 3**: Final map processing, region detection, and placement of:
-   - A research lab (goal)
-   - The player (start point)
-   - Zombies (autonomous enemies)
-   - Civilians (chased if spotted)
-   - Trees (decorative)
-
-This system meets and exceeds the brief's expectations by including **autonomous agents** (zombies and civilians) that interact with the world, fulfilling the additional feature requirement.
+Developed using Unity **2023.1.13f1**, all features are implemented in a single main scene (`Main.unity`) and organized via a single core script: **MapGenerator.cs**.
 
 ---
 
 ## Key Features
 
-### 🔹 Procedural Island Generation
-- **Cellular Automata Algorithm** forms cohesive landmasses from noisy input.
-- **Region segmentation** ensures each island is treated independently.
-- **Water and small region filtering** guarantees gameplay-suitable islands.
-
-### 🔹 Lab, Player, and Object Placement
-- The **lab** (yellow cube with point light) spawns on a large island.
-- The **player** (cylinder with light) spawns on the safest available island (fewest zombies).
-- **Zombies** (red cubes) are distributed based on island size using a density factor.
-- **Trees** (green spheres) decorate land with customizable density.
-
-### 🔹 Autonomous Agents
-- Zombies rotate towards the lab and wander across their island.
-- A subset of zombies can **spot and chase civilians** in their view range.
-- **Civilians** (cyan cubes) wander and flee when chased.
-
-### 🔹 Visual Enhancements
-- **Gizmos** color-code islands and display object placement for debugging.
-- Point lights on lab and player improve visibility and guide player focus.
+- 🌍 **Procedural Island Generation** using cellular automata and region detection.
+- 🔦 **Glowing Research Lab (Objective)**, spawned on a larger island.
+- 🧍‍♂️ **Player Start Point** (cylinder with light), placed on the safest island.
+- 🧟‍♂️ **Wandering Zombies** that face the lab and patrol their island.
+- 🌲 **Random Tree Placement** across land tiles for environmental variety.
+- 👨‍👩‍👧 **Autonomous Civilians (cyan cubes)** who patrol the island and **flee from nearby zombies**.
+- 🧟‍♂️➡️👤 **Zombie Chase Behavior** that dynamically reacts to nearby civilians.
 
 ---
 
-## AI & Additional Features
+## Procedural Generation Pipeline
 
-The project includes **custom autonomous agents** with simple yet effective behavior:
+The entire logic is encapsulated in `MapGenerator.cs` and runs in three main stages:
 
-- **Zombies**
-  - Face and wander toward the lab.
-  - Move randomly on their assigned island.
-  - If a civilian is within a set detection range, they chase them instead.
-  
-- **Civilians**
-  - Move randomly on their island.
-  - Flee away from zombies when they detect them.
+### 1. Initial Map Creation
+- Grid size (Width × Height) and land density (% filled) are configurable.
+- Circular islands are placed randomly on a water map using seed-based or random generation.
 
-These behaviors are implemented using Unity’s `Transform` and physics operations. No external AI packages were used. Instead, custom logic handles movement, line-of-sight detection, and response behaviors.
+### 2. Smoothing (Cellular Automata)
+- Land and water cells are updated over 5 iterations to form natural-looking islands.
+- Border cleanup ensures maps are always surrounded by water.
 
----
-
-## Usage Instructions
-
-### 💻 Unity Version
-This project was developed and tested with **Unity 2023.1.13f1**, meeting the ECS7016P version requirement.
-
-### ▶️ Playing the Scene
-1. Open `Main.unity`.
-2. Press **Play** in Unity Editor to generate a level.
-3. Click **Left Mouse Button** during play to regenerate the layout.
-
-### 🧭 Inspector Controls
-Inside the **MapGenerator** script component:
-- `Width` / `Height`: Size of the 2D map.
-- `Random Fill Percent`: Controls initial land density.
-- `Use Random Seed`: Toggle random or fixed layout.
-- `Zombie Density Factor`: Adjusts zombies per island.
-- `Allow Zombie Wandering`: Toggles enemy movement.
-- `Zombie Move Speed`: Controls patrol speed.
-- `Tree Spawn Chance`: Controls decorative tree density.
-
-### 🧱 Prefabs Overview
-| Element   | Appearance     | Description                                   |
-|-----------|----------------|-----------------------------------------------|
-| Lab       | Yellow Cube     | The goal; includes a light for visibility     |
-| Player    | Cylinder (Light)| Survivor start; not controllable              |
-| Zombie    | Red Cube        | Autonomous enemy agent                        |
-| Civilian  | Cyan Cube       | Randomly wandering human agents               |
-| Tree      | Green Sphere    | Decorative element on land tiles              |
-
-All elements are generated at runtime and fully procedural.
+### 3. Post-processing & Object Spawning
+- **Small islands** and **lakes** below a size threshold are removed or filled.
+- **Contiguous land regions** are identified for controlled spawning of:
+  - Lab (on a larger island)
+  - Zombies (proportional to island size)
+  - Player (on safest island)
+  - Trees (based on spawn chance)
+  - Civilians (randomly on each island)
 
 ---
 
-## Structure & Scripts
+## AI & Autonomous Agent Behaviors
 
-### 🔧 Main Script: `MapGenerator.cs`
+This project includes two types of autonomous agents:
 
-Located on an empty GameObject, this script controls all logic:
-- **`GenerateMap()`** – Triggers full map generation.
-- **`PopulateMap()`** – Initializes noisy land-water grid.
-- **`SmoothMap()`** – Applies Cellular Automata.
-- **`ProcessMap()`** – Finalizes islands, places objects.
-- **`RotateZombiesTowardLab()`** – Makes enemies face the lab.
-- **`MoveZombiesRandomly()`** – Handles random patrol movement.
-- **`SpawnCivilians()`** – Places civilians on land.
-- **`UpdateCivilians()`** – Handles civilian flee logic if chased.
+### Zombies (Red Cubes)
+- **Rotate toward the lab** constantly using `Quaternion.LookRotation`.
+- **Wander** around their island (if `allowZombieWandering` is enabled).
+- **Chase civilians** if they come within the `zombieChaseRange`.
 
-Additional dictionaries and logic handle:
-- Zombie-to-island mapping
-- Movement targets and wandering
-- Line-of-sight checks between zombies and civilians
+Implemented Methods:
+- `RotateZombiesTowardLab()`
+- `MoveZombiesWithChase()`
+
+### Civilians (Cyan Cubes)
+- **Idle wandering** around their spawn island.
+- **Flee** when zombies approach within `civilianFleeDistance`.
+
+Implemented Method:
+- `MoveCivilians()`
+
+These behaviors use basic steering logic and transform-based movement. No pathfinding or navigation mesh is used due to the 2D nature of the project.
 
 ---
 
-## Evaluation
+## Scene View
 
-This generator meets the design brief by:
-- Generating islands surrounded by ocean.
-- Spawning hazards (zombies) and goal (lab).
-- Supporting exploration and environmental storytelling.
-- Including autonomous agents with emergent behavior.
-- Remaining lightweight and easily extensible.
+In the editor, you can observe:
+- **Green land tiles** and **cyan water** using Gizmos.
+- **Lab** marked with a glowing yellow cube.
+- **Zombies** as red cubes rotating toward the lab.
+- **Civilians** as cyan cubes that flee when approached.
 
-Performance is optimized for a **100x100 map** size and smooth object spawning. The resulting levels vary each playthrough, showcasing **diversity and replay value**.
+---
+
+## MapGenerator Script Inspector Parameters
+
+Below are the key parameters exposed in Unity’s Inspector:
+
+### Map Dimensions
+- `Width`, `Height` – Controls grid size.
+
+### Random Seed Controls
+- `Seed`, `Use Random Seed`, `Random Fill Percent` – Affects initial layout randomness.
+
+### Prefabs
+- `Lab Prefab`, `Zombie Prefab`, `Player Prefab`, `Tree Prefab`, `Civilian Prefab`
+
+### Zombie Settings
+- `Zombie Move Chance`, `Zombie Density Factor`
+- `Min/Max Zombies Per Island`
+- `Zombie Move Speed`
+- `Allow Zombie Wandering`
+
+### Tree Settings
+- `Tree Spawn Chance` – % chance per tile.
+
+### Civilian Settings
+- `Civilians Per Island`
+- `Civilian Flee Distance`
+- `Civilian Move Speed`
+- `Zombie Chase Range`
+
+All values were carefully tuned for optimal simulation balance (see attached screenshots for the test configuration).
+![alt text](image.png)
+
+---
+
+## How to Run
+
+- Open the **Main.unity** scene.
+- Press **Play** to generate a level.
+- Click the **left mouse button** to regenerate with a new seed (if random seed is enabled).
+
+---
+
+## Technical Summary
+
+| Feature                | Implemented |
+|------------------------|-------------|
+| Procedural Terrain     | ✅          |
+| Autonomous Agents      | ✅ (Zombies, Civilians) |
+| AI Behaviors           | ✅ (Wander, Flee, Chase) |
+| Environment Generation | ✅          |
+| Object Placement Logic | ✅          |
+| Gizmo Debugging        | ✅          |
+| Configurable Parameters| ✅          |
+| Light-based Markers    | ✅          |
 
 ---
 
 ## Credits and References
 
-### Procedural Generation Algorithm
-Based on the framework from **Sebastian Lague’s Procedural Cave Generation** tutorial. The initial noise map and smoothing algorithm (Stage 2) are adapted from this source.
+### Procedural Generation
+- **Based on**: [Sebastian Lague’s Procedural Cave Generation Tutorial Series](https://youtube.com/playlist?list=PLFt_AvWsXl0eZgMK_DT5_biRkWXftAOf9)
+- **Adapted by**: Student (customized for island generation, lab logic, civilian & zombie placement).
 
-### Design & Code
-All Stage 1 and Stage 3 logic, including island region detection, lab/zombie/player/civilian placement, object management, and agent behavior, was designed and implemented by the student.
-
-### Additional Feature – Autonomous Agents
-The inclusion of **zombies and civilians with patrol and flee behavior** fulfills the additional feature requirement. AI behaviors are implemented using Unity’s `Transform` system and proximity detection logic.
+### Design and Implementation
+- All logic in `MapGenerator.cs` was implemented by the student, including additional methods like `MoveZombiesWithChase()` and `MoveCivilians()` to demonstrate agent-based interactivity.
 
 ### AI Assistance
-**ChatGPT (by OpenAI)** was used for:
-- Debugging assistance
-- Code design refinement
-- Writing detailed comments
-- Readme formatting
-
-All AI-generated suggestions were reviewed, tested, and adapted by the student to fit the unique needs of the project.
-
-### Unity Version
-Unity **2023.1.13f1** — fully compatible with coursework expectations.
+- **ChatGPT (OpenAI)** was used to:
+  - Suggest improvements for zombie/civilian behavior.
+  - Help with debugging logic.
+  - Guide structuring and documentation (including this README).
+- All AI-generated code was reviewed and integrated manually by the student.
 
 ### Assets
-All prefabs are custom-made using **Unity primitives**:
-- No third-party models, textures, or sounds were used.
-- All assets are kept minimal to stay within the size limit.
+- All prefabs (lab, player, zombie, civilian, tree) were created from Unity primitives.
+- No external models, textures, or packages were used.
 
 ### Acknowledgements
-Thanks to:
-- **Course instructors** for guidance.
-- **Sebastian Lague** for foundational generation techniques.
-- **OpenAI's ChatGPT** for support during development and documentation.
+- Thanks to **Queen Mary University of London** instructors and **Sebastian Lague** for their inspiration and guidance materials.
 
 ---
 
-## Submission Notes
+## Final Notes
 
-- All changes were implemented in the provided `Main.unity` scene.
-- Core logic exists in `MapGenerator.cs` as per assignment rules.
-- The project is zipped and under the 50MB requirement.
+This project fulfills the coursework requirements for the "Interactive Agents and Procedural Generation" module by demonstrating:
+- A complete procedural level design,
+- Integration of autonomous AI agents,
+- Simulation logic that aligns with the narrative of a post-apocalyptic survival experience.
+
+All logic is confined within the `MapGenerator.cs` script and can be reviewed for detailed implementation and educational purposes.
+

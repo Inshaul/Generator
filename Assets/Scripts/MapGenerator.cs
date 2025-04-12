@@ -72,15 +72,14 @@ public class MapGenerator : MonoBehaviour
 
         // Make zombies rotate toward the lab
         RotateZombiesTowardLab();
-
-        // Move zombies if wandering is enabled
-        // if (allowZombieWandering)
-        // {
-        //     MoveZombiesRandomly();
-        // }
-
+        
+        //Wander Civilians
         MoveCivilians();
-        MoveZombiesWithChase();
+
+        //if allowZombieWandering is true, then allow zombie move and chase functionality
+        if(allowZombieWandering){
+            MoveZombiesWithChase();
+        }
     }
 
     void MoveCivilians()
@@ -261,34 +260,6 @@ public class MapGenerator : MonoBehaviour
                     Quaternion rot = Quaternion.LookRotation(dir);
                     zombie.transform.rotation = Quaternion.Slerp(zombie.transform.rotation, rot, Time.deltaTime * 2f);
                 }
-            }
-        }
-    }
-
-    // Moves zombies toward a random point on their island
-    void MoveZombiesRandomly()
-    {
-        foreach (var zombie in spawnedZombies)
-        {
-            if (zombie == null || !zombieToIsland.ContainsKey(zombie)) continue;
-
-            Vector3 currentPos = zombie.transform.position;
-            Vector3 targetPos = zombieTargetPositions[zombie];
-
-            // Move towards the current target
-            zombie.transform.position = Vector3.MoveTowards(currentPos, targetPos, zombieMoveSpeed * Time.deltaTime);
-
-            // If near target, choose a new one
-            if (Vector3.Distance(currentPos, targetPos) < 0.1f)
-            {
-                List<Vector2Int> islandTiles = zombieToIsland[zombie];
-                List<Vector2Int> validTiles = islandTiles.FindAll(tile => IsInMapRange(tile.x, tile.y) && map[tile.x, tile.y] == 1);
-                if (validTiles.Count == 0) continue;
-
-                Vector2Int newCoord = validTiles[UnityEngine.Random.Range(0, validTiles.Count)];
-                Vector3 newWorldPos = CoordToWorldPoint(newCoord.x, newCoord.y) + Vector3.up * 0.5f;
-
-                zombieTargetPositions[zombie] = newWorldPos;
             }
         }
     }
