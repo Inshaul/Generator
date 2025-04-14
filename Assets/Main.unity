@@ -477,7 +477,7 @@ MonoBehaviour:
   civilianPrefab: {fileID: 6547322782340710972, guid: bb3d7dfaa88b3cc4c94e73d691c977e5, type: 3}
   civiliansPerIsland: 1
   civilianFleeDistance: 3
-  civilianMoveSpeed: 1.5
+  civilianMoveSpeed: 1.2
   zombieChaseRange: 4
 --- !u!4 &723202080
 Transform:
